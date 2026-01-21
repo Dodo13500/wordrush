@@ -2,7 +2,7 @@
 
 World Rush est un jeu d'association d'idées rapide et compétitif codé en Python. Jouez en local ou en ligne, défiez vos amis et testez votre rapidité !
 
-## ⚠️ Prérequis Importants
+##  Prérequis Importants
 
 Ce projet nécessite une version récente de Python pour fonctionner correctement.
 
