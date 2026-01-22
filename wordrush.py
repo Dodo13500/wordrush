@@ -7,6 +7,7 @@ import json
 import os
 import math
 import urllib.request
+import subprocess
 try:
     import winsound
 except ImportError:
@@ -23,9 +24,19 @@ ALERT_COLOR = (255, 80, 100)  # Rouge vif
 HOVER_COLOR = (50, 255, 220)
 FONT_SIZE = 28
 PORT = 5555
+# Configuration Mise à jour (À configurer avec votre lien GitHub RAW)
+CURRENT_VERSION = "v0.3"
+UPDATE_URL_BASE = "https://raw.githubusercontent.com/VOTRE_NOM_GITHUB/VOTRE_REPO/main" 
+UPDATE_URL_BASE = "https://raw.githubusercontent.com/VOTRE_NOM_GITHUB/VOTRE_REPO/main"
 SETTINGS_FILE = "world_rush_settings.json"
 HISTORY_FILE = "game_history.json"
-AVATARS = ["🙂", "😎", "🤖", "👽", "🦊", "🐱", "🐶", "🦁", "🦄", "💀", "👻", "💩", "👾", "🤡", "🤠", "👺"]
+AVATARS = [
+    "🙂", "😎", "🤖", "👽", "🦊", "🐱", "🐶", "🦁", "🦄", "💀", "👻", "💩", "👾", "🤡", "🤠", "👺",
+    "😊", "😂", "🤣", "😍", "😒", "😘", "😜", "🤔", "🙄", "😴", "😷", "🤒", "🤕", "🤢", "🤧", "😇",
+    "🥳", "🥺", "🤬", "😈", "👿", "👹", "👺", "☠️", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿",
+    "😾", "🙈", "🙉", "🙊", "🐵", "🐺", "🐯", "🦒", "🦝", "🐷", "🐗", "🐭", "🐹", "🐰", "🐻", "🐨",
+    "🐼", "🐸", "🦓", "🐴", "🐔", "🐲", "🐾", "🐒", "🦍", "🦧", "🦮", "🐕", "🐩", "🐈", "🐅", "🐆"
+]
 
 # Catégories de mots
 WORD_CATEGORIES = {
@@ -42,7 +53,7 @@ WORD_CATEGORIES = {
 }
 
 class Button:
-    def __init__(self, text, x, y, w, h, color, hover_color, action=None, font=None, text_color=None):
+    def __init__(self, text, x, y, w, h, color, hover_color, action=None, font=None, text_color=None, scale_on_hover=False):
         self.rect = pygame.Rect(x, y, w, h)
         self.text = text
         self.color = color
@@ -50,6 +61,7 @@ class Button:
         self.action = action
         self.font = font if font else pygame.font.SysFont("Arial", 26, bold=True)
         self.text_color = text_color if text_color else (20, 25, 35)
+        self.scale_on_hover = scale_on_hover
 
     def draw(self, screen, offset_y=0):
         mouse_pos = pygame.mouse.get_pos()
@@ -61,9 +73,22 @@ class Button:
         pygame.draw.rect(screen, (255, 255, 255, 30), self.rect.inflate(-4, -4), border_radius=10)
         pygame.draw.rect(screen, (255, 255, 255, 50), self.rect, 2, border_radius=12)
         
-        text_surf = self.font.render(self.text, True, self.text_color)
-        text_rect = text_surf.get_rect(center=self.rect.center)
-        screen.blit(text_surf, text_rect)
+        # Gestion multi-lignes
+        lines = self.text.split('\n')
+        line_height = self.font.get_height()
+        total_height = len(lines) * line_height
+        start_y = self.rect.centery - total_height / 2
+
+        for i, line in enumerate(lines):
+            text_surf = self.font.render(line, True, self.text_color)
+            
+            if self.scale_on_hover and self.rect.collidepoint(mouse_pos):
+                w = text_surf.get_width()
+                h = text_surf.get_height()
+                text_surf = pygame.transform.smoothscale(text_surf, (int(w * 1.2), int(h * 1.2)))
+                
+            text_rect = text_surf.get_rect(center=(self.rect.centerx, start_y + i * line_height + line_height / 2))
+            screen.blit(text_surf, text_rect)
 
     def check_click(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -81,9 +106,12 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Arial", FONT_SIZE)
         self.big_font = pygame.font.SysFont("Arial", 60, bold=True)
+        self.title_font = pygame.font.SysFont("Impact", 100)
         self.emoji_font = pygame.font.SysFont("Segoe UI Emoji", 80) # Pour les avatars (Grand)
         self.ui_emoji_font = pygame.font.SysFont("Segoe UI Emoji", 40) # Pour les avatars (Petit/UI)
         self.medium_font = pygame.font.SysFont("Arial", 45, bold=True)
+        self.button_font = pygame.font.SysFont("Arial", 38, bold=True)
+        self.small_bold_font = pygame.font.SysFont("Arial", 28, bold=True)
         self.timer_font = pygame.font.SysFont("Consolas", 80, bold=True) # Police fixe pour chrono fluide
         
         # États du jeu
@@ -138,6 +166,10 @@ class Game:
         self.friends = []
         self.friend_name_input = ""
         self.friend_ip_input = ""
+        self.cat_name_input = ""
+        self.cat_words_input = ""
+        self.custom_categories = {}
+        self.all_categories = WORD_CATEGORIES.copy()
         self.active_input = "name"
         self.sound_on = True
         self.used_words = []
@@ -145,6 +177,16 @@ class Game:
         self.feedback_timer = 0
         self.prev_state = "MENU_MAIN"
         self.shake_timer = 0
+        self.chat_scroll = 0
+        self.avatar_scroll = 0
+        self.avatar_grid_buttons = []
+        self.menu_particles = []
+        
+        # Transition
+        self.transition_alpha = 0
+        self.transition_state = None
+        self.next_state = None
+        self.update_available = False
         
         # Réseau
         self.server = None
@@ -161,6 +203,7 @@ class Game:
         self.t_press_count = 0
         self.last_t_press = 0
         self.bot_timer = 0
+        pygame.scrap.init()
 
         # Chargement des paramètres
         self.load_settings()
@@ -168,6 +211,9 @@ class Game:
             self.state = "TUTORIAL"
         elif self.username:
             self.state = "MENU_MAIN"
+            
+        # Vérification mise à jour en arrière-plan
+        threading.Thread(target=self.check_update, daemon=True).start()
 
         # UI
         self.buttons = []
@@ -187,12 +233,17 @@ class Game:
                     self.friends = data.get("friends", [])
                     for k, v in saved_keys.items():
                         self.keys[k] = v
+                    self.custom_categories = data.get("custom_categories", {})
+                    self.all_categories = WORD_CATEGORIES.copy()
+                    self.all_categories.update(self.custom_categories)
+                    self.xp = data.get("xp", 0)
+                    self.level = data.get("level", 1)
             except:
                 pass
 
     def save_settings(self):
         # Sauvegarder pseudo et touches
-        data = {"username": self.username, "avatar": self.avatar, "sound": self.sound_on, "keys": self.keys, "first_run": self.first_run, "friends": self.friends}
+        data = {"username": self.username, "avatar": self.avatar, "sound": self.sound_on, "keys": self.keys, "first_run": self.first_run, "friends": self.friends, "xp": self.xp, "level": self.level, "custom_categories": self.custom_categories}
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(data, f)
@@ -206,6 +257,8 @@ class Game:
             except:
                 pass
         self.username = ""
+        self.xp = 0
+        self.level = 1
         self.settings['players'] = 2
         self.settings['win_score'] = 5
         self.first_run = True
@@ -246,6 +299,40 @@ class Game:
                 pygame.draw.circle(s, (*p['color'], int(p['life'])), (int(p['size']), int(p['size'])), int(p['size']))
                 self.screen.blit(s, (p['x'] - p['size'], p['y'] - p['size']))
 
+    def update_draw_menu_particles(self):
+        # Ajout de particules d'ambiance (Menu)
+        if len(self.menu_particles) < 50:
+            self.menu_particles.append({
+                'x': random.randint(0, SCREEN_WIDTH),
+                'y': SCREEN_HEIGHT + 10,
+                'vx': random.uniform(-0.5, 0.5),
+                'vy': random.uniform(-1, -3),
+                'size': random.randint(2, 5),
+                'color': (random.randint(20, 40), random.randint(30, 50), random.randint(40, 60)),
+                'alpha': random.randint(50, 150)
+            })
+
+        for p in self.menu_particles[:]:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['alpha'] -= 0.5
+            if p['y'] < -10 or p['alpha'] <= 0:
+                self.menu_particles.remove(p)
+            else:
+                s = pygame.Surface((int(p['size']*2), int(p['size']*2)), pygame.SRCALPHA)
+                pygame.draw.circle(s, (*p['color'], int(p['alpha'])), (int(p['size']), int(p['size'])), int(p['size']))
+                self.screen.blit(s, (p['x'], p['y']))
+
+    def gain_xp(self, amount):
+        self.xp += amount
+        threshold = self.level * 100
+        while self.xp >= threshold:
+            self.xp -= threshold
+            self.level += 1
+            threshold = self.level * 100
+            self.play_sound("start") # Son de level up
+        self.save_settings()
+
     def play_sound(self, type):
         if self.sound_on and winsound:
             if type == "chat": threading.Thread(target=winsound.Beep, args=(1000, 100), daemon=True).start()
@@ -263,6 +350,11 @@ class Game:
 
     def random_avatar(self):
         self.avatar = random.choice(AVATARS)
+        self.create_menu_buttons()
+
+    def set_avatar(self, avatar):
+        self.avatar = avatar
+        self.create_menu_buttons()
 
     def reset_history(self):
         self.used_words = []
@@ -290,6 +382,69 @@ class Game:
             del self.friends[idx]
             self.save_settings()
             self.create_menu_buttons()
+            
+    def copy_ip(self):
+        if self.public_ip:
+            try:
+                pygame.scrap.put(pygame.SCRAP_TEXT, self.public_ip.encode('utf-8'))
+                self.connect_status = "IP Copiée !" # Reuse connect_status for feedback
+            except: pass
+
+    def save_custom_category(self):
+        if self.cat_name_input and self.cat_words_input:
+            words = [w.strip() for w in self.cat_words_input.split(',')]
+            if len(words) >= 5:
+                self.custom_categories[self.cat_name_input.upper()] = words
+                self.all_categories.update(self.custom_categories)
+                self.save_settings()
+                self.cat_name_input = ""
+                self.cat_words_input = ""
+                self.set_state("MENU_CUSTOM_CATS")
+    
+    def delete_custom_category(self, name):
+        if name in self.custom_categories:
+            del self.custom_categories[name]
+            self.all_categories = WORD_CATEGORIES.copy()
+            self.all_categories.update(self.custom_categories)
+            # Reset category if current is deleted
+            if self.settings['category'] == name:
+                self.settings['category'] = 'GÉNÉRAL'
+            self.save_settings()
+            self.create_menu_buttons()
+
+    def check_update(self):
+        if "VOTRE_NOM_GITHUB" in UPDATE_URL_BASE: return # Pas configuré
+        base_url = UPDATE_URL_BASE.rstrip('/') # Sécurité si l'utilisateur met un slash à la fin
+        try:
+            url = f"{UPDATE_URL_BASE}/version.txt"
+            url = f"{base_url}/version.txt"
+            with urllib.request.urlopen(url, timeout=3) as response:
+                remote_ver = response.read().decode('utf-8').strip()
+                if remote_ver != CURRENT_VERSION:
+                    self.update_available = True
+                    if self.state == "MENU_MAIN": self.create_menu_buttons()
+        except: pass
+
+    def perform_update(self):
+        try:
+            # 1. Télécharger le nouveau code
+            code_url = f"{UPDATE_URL_BASE}/wordrush.py"
+            base_url = UPDATE_URL_BASE.rstrip('/')
+            code_url = f"{base_url}/wordrush.py"
+            new_code = urllib.request.urlopen(code_url, timeout=10).read()
+            with open("wordrush_new.py", "wb") as f:
+                f.write(new_code)
+            # 2. Script de remplacement (Windows)
+            with open("update.bat", "w") as f:
+                f.write("""@echo off
+timeout /t 1 /nobreak >nul
+move /y wordrush_new.py wordrush.py
+start python wordrush.py
+del update.bat""")
+            # 3. Exécuter et quitter
+            subprocess.Popen("update.bat", shell=True)
+            self.force_quit()
+        except: pass
 
     def join_friend(self, ip):
         self.input_ip = ip
@@ -306,28 +461,56 @@ class Game:
         elif self.state == "INPUT_NAME":
             # Boutons de sélection d'avatar
             cy = SCREEN_HEIGHT // 2
-            # Redesign v0.2 : Interface centrée type "Carte de profil"
-            self.buttons = [
-                Button("<", cx - 160, cy - 80, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_avatar(-1), text_color=(200, 200, 200)),
-                Button(">", cx + 100, cy - 80, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_avatar(1), text_color=(200, 200, 200)),
-                Button("🎲", cx - 30, cy + 10, 60, 50, PANEL_COLOR, HOVER_COLOR, self.random_avatar, font=self.ui_emoji_font, text_color=(255, 255, 255)),
-                Button("VALIDER", cx - 100, cy + 160, 200, 60, ACCENT_COLOR, HOVER_COLOR, self.validate_name)
-            ]
+            
+            # Zone de défilement pour les avatars (Sous la photo de profil)
+            scroll_y_start = cy - 150
+            
+            # Grille d'avatars
+            cols = 10
+            btn_size = 45
+            gap = 10
+            total_w = cols * btn_size + (cols - 1) * gap
+            start_x = cx - total_w // 2
+            
+            self.avatar_grid_buttons = []
+            
+            for i, av in enumerate(AVATARS):
+                row = i // cols
+                col = i % cols
+                bx = start_x + col * (btn_size + gap)
+                by = scroll_y_start + row * (btn_size + gap) - self.avatar_scroll
+                color = ACCENT_COLOR if av == self.avatar else PANEL_COLOR
+                self.avatar_grid_buttons.append(Button(av, bx, by, btn_size, btn_size, color, HOVER_COLOR, lambda a=av: self.set_avatar(a), font=self.ui_emoji_font, text_color=(255,255,255), scale_on_hover=True))
+
+            # Dé à côté du profil (Profil à cy - 260)
+            self.buttons.append(Button("🎲", cx + 90, cy - 290, 60, 60, PANEL_COLOR, HOVER_COLOR, self.random_avatar, font=self.ui_emoji_font, text_color=(255, 255, 255)))
+            self.buttons.append(Button("VALIDER", cx - 125, cy + 200, 250, 70, ACCENT_COLOR, HOVER_COLOR, self.validate_name))
 
         elif self.state == "MENU_MAIN":
-            btn_w = 360
+            # Redesign complet du menu principal
+            self.buttons = [
+                Button("JOUER EN LOCAL\n(Même PC)", cx - 300, 320, 250, 150, ACCENT_COLOR, HOVER_COLOR, self.setup_local, font=self.small_bold_font),
+                Button("JOUER EN LIGNE\n(Réseau)", cx + 50, 320, 250, 150, (0, 150, 255), (50, 180, 255), lambda: self.set_state("MENU_ONLINE"), font=self.small_bold_font),
+            ]
+            
+            # Barre d'outils en bas
+            btn_w = 200
             btn_h = 60
             gap = 20
-            start_y = 280
+            start_y = 550
             self.buttons = [
-                Button("LOCAL (Même PC)", cx - btn_w//2, start_y, btn_w, btn_h, ACCENT_COLOR, HOVER_COLOR, self.setup_local),
-                Button("EN LIGNE (Réseau)", cx - btn_w//2, start_y + btn_h + gap, btn_w, btn_h, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_ONLINE")),
-                Button("MON PROFIL", cx - btn_w//2, start_y + (btn_h + gap)*2, btn_w, btn_h, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("INPUT_NAME")),
-                Button("PARAMÈTRES", cx - btn_w//2, start_y + (btn_h + gap)*3, btn_w, btn_h, (100, 100, 120), (140, 140, 160), lambda: self.set_state("SETTINGS")),
-                Button("COMMENT JOUER", cx - btn_w//2, start_y + (btn_h + gap)*4, btn_w, btn_h, (100, 100, 120), (140, 140, 160), lambda: self.set_state("HOW_TO")),
-                Button("QUITTER", cx - btn_w//2, start_y + (btn_h + gap)*5, btn_w, btn_h, ALERT_COLOR, (255, 100, 120), self.ask_quit),
-                Button("AMIS", SCREEN_WIDTH - 180, 30, 150, 50, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_FRIENDS"))
+                *self.buttons,
+                Button("MON PROFIL", cx - 320, start_y, btn_w, btn_h, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("INPUT_NAME")),
+                Button("AMIS", cx - 100, start_y, btn_w, btn_h, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_FRIENDS")),
+                Button("PARAMÈTRES", cx + 120, start_y, btn_w, btn_h, (100, 100, 120), (140, 140, 160), lambda: self.set_state("SETTINGS")),
+                Button("QUITTER", cx - 100, start_y + 80, 200, 50, ALERT_COLOR, (255, 100, 120), self.ask_quit),
+                Button("?", SCREEN_WIDTH - 80, 30, 50, 50, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("HOW_TO"))
             ]
+            
+            if self.update_available:
+                self.buttons.append(Button("MISE À JOUR DISPO !", cx - 150, 20, 300, 50, (0, 255, 0), (50, 255, 50), self.perform_update))
+                self.buttons.append(Button("MISE À JOUR DISPO !", cx - 150, 80, 300, 50, (0, 255, 0), (50, 255, 50), self.perform_update))
+
         elif self.state == "MENU_ONLINE":
             self.buttons = [
                 Button("HÉBERGER", cx - 250, 350, 240, 60, ACCENT_COLOR, HOVER_COLOR, self.setup_host),
@@ -339,7 +522,7 @@ class Game:
             cx = SCREEN_WIDTH // 2
             current_y = 220 # Starting Y for the first setting block (Aligné avec l'affichage)
             block_gap = 100 # Vertical space between setting blocks (Aligné avec l'affichage)
-            btn_off = 220   # Écartement des boutons pour laisser place au texte
+            btn_off = 150   # Écartement standard (Rapproché)
             
             # 1. Joueurs
             if self.is_local_game:
@@ -353,8 +536,9 @@ class Game:
             current_y += block_gap
             
             # 3. Catégorie
-            self.buttons.append(Button("<", cx - btn_off, current_y, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_setting('category', -1)))
-            self.buttons.append(Button(">", cx + btn_off - 60, current_y, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_setting('category', 1)))
+            btn_off_cat = 280 # Plus large pour les thèmes
+            self.buttons.append(Button("<", cx - btn_off_cat, current_y, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_setting('category', -1)))
+            self.buttons.append(Button(">", cx + btn_off_cat - 60, current_y, 60, 60, PANEL_COLOR, ACCENT_COLOR, lambda: self.change_setting('category', 1)))
             current_y += block_gap
             
             # 4. Temps
@@ -374,25 +558,53 @@ class Game:
             sound_txt = "SON : ON" if self.sound_on else "SON : OFF"
             sound_col = ACCENT_COLOR if self.sound_on else (100, 100, 100)
             self.buttons = [
-                Button(sound_txt, cx - 180, 250, 360, 60, sound_col, HOVER_COLOR, self.toggle_sound),
-                Button("RÉINITIALISER DONNÉES", cx - 180, 330, 360, 60, ALERT_COLOR, (255, 100, 120), self.reset_app),
-                Button("TOUCHES / CLAVIER", cx - 180, 410, 360, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("CONTROLS")),
-                Button("RETOUR", cx - 180, 550, 360, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_MAIN"))
+                Button(sound_txt, cx - 300, 280, 600, 60, sound_col, HOVER_COLOR, self.toggle_sound),
+                Button("CATÉGORIES PERSO", cx - 300, 360, 600, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_CUSTOM_CATS")),
+                Button("RÉINITIALISER DONNÉES", cx - 300, 440, 600, 60, ALERT_COLOR, (255, 100, 120), self.reset_app),
+                Button("TOUCHES / CLAVIER", cx - 300, 520, 600, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("CONTROLS")),
+                Button("RETOUR", cx - 300, 650, 600, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_MAIN"))
             ]
         elif self.state == "MENU_FRIENDS":
             start_y = 220
+            # Récupérer l'IP si pas encore fait
+            if self.public_ip is None:
+                threading.Thread(target=self.get_public_ip, daemon=True).start()
+                
             for i, friend in enumerate(self.friends):
                 # Bouton Rejoindre Ami
                 self.buttons.append(Button("REJOINDRE", cx + 80, start_y + i*70, 140, 50, ACCENT_COLOR, HOVER_COLOR, lambda ip=friend['ip']: self.join_friend(ip)))
                 # Bouton Supprimer (X)
                 self.buttons.append(Button("X", cx + 230, start_y + i*70, 50, 50, ALERT_COLOR, (255, 100, 100), lambda idx=i: self.delete_friend(idx)))
             
-            self.buttons.append(Button("AJOUTER UN AMI", cx - 150, start_y + len(self.friends)*70 + 30, 300, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_ADD_FRIEND")))
+            # Bouton Copier IP
+            self.buttons.append(Button("COPIER", cx + 180, 160, 100, 40, ACCENT_COLOR, HOVER_COLOR, self.copy_ip, font=pygame.font.SysFont("Arial", 20, bold=True)))
+            
+            self.buttons.append(Button("AJOUTER UN AMI", cx - 150, 620, 300, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_ADD_FRIEND")))
             self.buttons.append(Button("RETOUR", 50, 50, 150, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("MENU_JOIN")))
         elif self.state == "MENU_ADD_FRIEND":
             self.buttons = [
                 Button("SAUVEGARDER", cx - 150, 500, 300, 60, ACCENT_COLOR, HOVER_COLOR, self.add_friend),
                 Button("ANNULER", cx - 150, 580, 300, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("MENU_FRIENDS"))
+            ]
+        elif self.state == "MENU_CUSTOM_CATS":
+            cx = SCREEN_WIDTH // 2
+            start_y = 200
+            for i, cat in enumerate(self.custom_categories.keys()):
+                self.buttons.append(Button("X", cx + 200, start_y + i*60, 50, 50, ALERT_COLOR, (255, 100, 100), lambda c=cat: self.delete_custom_category(c)))
+            
+            self.buttons.append(Button("NOUVELLE CATÉGORIE", cx - 150, 600, 300, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("EDIT_CAT_NAME")))
+            self.buttons.append(Button("RETOUR", 50, 50, 150, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("SETTINGS")))
+        elif self.state == "EDIT_CAT_NAME":
+            cx = SCREEN_WIDTH // 2
+            self.buttons = [
+                Button("SUIVANT", cx - 150, 500, 300, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("EDIT_CAT_WORDS") if self.cat_name_input else None),
+                Button("ANNULER", cx - 150, 580, 300, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("MENU_CUSTOM_CATS"))
+            ]
+        elif self.state == "EDIT_CAT_WORDS":
+            cx = SCREEN_WIDTH // 2
+            self.buttons = [
+                Button("SAUVEGARDER", cx - 150, 600, 300, 60, ACCENT_COLOR, HOVER_COLOR, self.save_custom_category),
+                Button("RETOUR", cx - 150, 680, 300, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("EDIT_CAT_NAME"))
             ]
         elif self.state == "CONTROLS":
             cx = SCREEN_WIDTH // 2
@@ -412,8 +624,8 @@ class Game:
         elif self.state == "MENU_JOIN":
             cx = SCREEN_WIDTH // 2
             self.buttons = [
-                Button("CONNEXION", cx - 150, 550, 300, 70, ACCENT_COLOR, HOVER_COLOR, self.connect_to_host),
-                Button("MES AMIS", cx - 150, 640, 300, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_FRIENDS")),
+                Button("CONNEXION", cx - 150, 500, 300, 70, ACCENT_COLOR, HOVER_COLOR, self.connect_to_host),
+                Button("MES AMIS", cx - 150, 590, 300, 60, PANEL_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_FRIENDS")),
                 Button("RETOUR", 50, 50, 150, 60, ALERT_COLOR, (255, 100, 120), lambda: self.set_state("MENU_ONLINE"))
             ]
         elif self.state == "GAME_OVER":
@@ -429,17 +641,33 @@ class Game:
                 Button("OUI, QUITTER", cx - 210, 500, 200, 60, ALERT_COLOR, (255, 100, 100), self.force_quit),
                 Button("NON, RETOUR", cx + 10, 500, 200, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state(self.prev_state))
             ]
+        elif self.state == "CONFIRM_LEAVE":
+            cx = SCREEN_WIDTH // 2
+            self.buttons = [
+                Button("OUI, QUITTER", cx - 210, 500, 200, 60, ALERT_COLOR, (255, 100, 100), self.reset_network),
+                Button("NON, RESTER", cx + 10, 500, 200, 60, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("LOBBY"))
+            ]
 
     def set_state(self, new_state):
-        self.state = new_state
+        if new_state == self.state: return
+        self.next_state = new_state
+        self.transition_state = "OUT"
+
+    def _apply_state_change(self):
         self.buttons = []
-        if new_state in ["MENU_MAIN", "MENU_ONLINE", "SETUP", "INPUT_NAME", "GAME_OVER", "SETTINGS", "CONTROLS", "OPPONENT_LEFT", "MENU_JOIN", "TUTORIAL", "MENU_FRIENDS", "MENU_ADD_FRIEND", "CONFIRM_QUIT"]:
+        self.avatar_grid_buttons = []
+        if self.state == "INPUT_NAME":
+            self.avatar_scroll = 0
+        if self.state == "MENU_FRIENDS":
+            self.connect_status = "" # Reset copy feedback
+            
+        if self.state in ["MENU_MAIN", "MENU_ONLINE", "SETUP", "INPUT_NAME", "GAME_OVER", "SETTINGS", "CONTROLS", "OPPONENT_LEFT", "MENU_JOIN", "TUTORIAL", "MENU_FRIENDS", "MENU_ADD_FRIEND", "CONFIRM_QUIT", "CONFIRM_LEAVE", "MENU_CUSTOM_CATS", "EDIT_CAT_NAME", "EDIT_CAT_WORDS"]:
             self.create_menu_buttons()
-        elif new_state == "HOW_TO":
+        elif self.state == "HOW_TO":
             self.buttons = [Button("RETOUR", 50, 50, 150, 50, ACCENT_COLOR, HOVER_COLOR, lambda: self.set_state("MENU_MAIN"))]
-        elif new_state == "LOBBY":
-            self.buttons = [Button("RETOUR", 50, 50, 150, 50, ALERT_COLOR, (255, 100, 120), self.reset_network)]
-        elif new_state == "JUDGMENT":
+        elif self.state == "LOBBY":
+            self.buttons = [Button("RETOUR", 50, 50, 150, 50, ALERT_COLOR, (255, 100, 120), self.ask_leave_lobby)]
+        elif self.state == "JUDGMENT":
             cx = SCREEN_WIDTH // 2
             if self.is_local_game or self.judge_id == self.my_id:
                 self.buttons = [
@@ -472,6 +700,7 @@ class Game:
             self.settings['mode'] = 'WRITTEN' if self.settings['mode'] == 'VOCAL' else 'VOCAL'
         elif key == 'category':
             cats = list(WORD_CATEGORIES.keys())
+            cats = list(self.all_categories.keys())
             current_idx = cats.index(self.settings['category'])
             next_idx = (current_idx + delta) % len(cats)
             if next_idx < 0: # Handle negative modulo result for previous button
@@ -710,6 +939,10 @@ class Game:
     def ask_quit(self):
         self.prev_state = self.state
         self.set_state("CONFIRM_QUIT")
+        
+    def ask_leave_lobby(self):
+        self.prev_state = self.state
+        self.set_state("CONFIRM_LEAVE")
 
     def force_quit(self):
         self.state = "EXITING"
@@ -736,6 +969,7 @@ class Game:
             self.server.bind(('0.0.0.0', PORT))
             self.server.listen(1)
             self.conn, addr = self.server.accept()
+            self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) # Stabilité / Latence
             self.connected = True
             self.send_name() # Envoi immédiat du nom
             # Sync Ready Status (Si l'hôte est déjà prêt quand le client arrive)
@@ -769,6 +1003,7 @@ class Game:
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.settimeout(5)
             self.conn.connect((self.input_ip, PORT))
+            self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) # Stabilité / Latence
             self.conn.settimeout(None)
             self.connected = True
             self.send_name() # Envoi immédiat du nom
@@ -831,7 +1066,7 @@ class Game:
         self.process_action(f"REMATCH|{self.my_id}")
 
     def get_random_word(self):
-        return random.choice(WORD_CATEGORIES[self.settings['category']])
+        return random.choice(self.all_categories[self.settings['category']])
 
     def check_start_game(self):
         # Si tout le monde est prêt
@@ -907,6 +1142,13 @@ class Game:
                 # Vérification victoire
                 if self.score[winner_idx] >= self.settings['win_score']:
                     self.winner_text = f"Joueur {winner_idx + 1}" if self.is_local_game else (self.username if winner_idx == self.my_id else self.opponent_name)
+                    
+                    # Gain XP fin de partie
+                    if self.is_local_game:
+                        self.gain_xp(50)
+                    else:
+                        self.gain_xp(100 if winner_idx == self.my_id else 25)
+                        
                     self.set_state("GAME_OVER")
                 else:
                     self.current_player = winner_idx
@@ -987,6 +1229,10 @@ class Game:
         for y in range(-50, SCREEN_HEIGHT, 50):
             draw_y = y + offset
             pygame.draw.line(self.screen, grid_color, (0, draw_y), (SCREEN_WIDTH, draw_y))
+            
+        # Particules Menu
+        if self.state.startswith("MENU") or self.state == "INPUT_NAME":
+            self.update_draw_menu_particles()
         
         # Vignette v0.2 (Assombrir les coins)
         # On dessine un grand cercle radial simulé par des rectangles transparents sur les bords
@@ -1016,6 +1262,15 @@ class Game:
                     running = False
                     break
                 
+                if event.type == pygame.MOUSEWHEEL:
+                    if self.state == "LOBBY":
+                        self.chat_scroll += event.y
+                        if self.chat_scroll < 0: self.chat_scroll = 0
+                    elif self.state == "INPUT_NAME":
+                        self.avatar_scroll -= event.y * 20 # Vitesse de scroll
+                        if self.avatar_scroll < 0: self.avatar_scroll = 0
+                        self.create_menu_buttons() # Recalculer positions
+
                 # --- MODE TEST (Touche T x3) ---
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_t:
                     now = pygame.time.get_ticks()
@@ -1051,9 +1306,14 @@ class Game:
                         elif len(self.username) < 15: self.username += event.unicode
 
                 # Gestion des boutons
-                for btn in self.buttons:
-                    if btn.check_click(event):
-                        break
+                if self.transition_state is None:
+                    for btn in self.buttons:
+                        if btn.check_click(event):
+                            break
+                    
+                    for btn in self.avatar_grid_buttons:
+                        if btn.check_click(event):
+                            break
                 
                 # --- LOGIQUE DU MENU ---
                 if self.state == "MENU_JOIN":
@@ -1086,6 +1346,18 @@ class Game:
                                 self.friend_name_input += event.unicode
                             elif self.active_input == "ip" and len(self.friend_ip_input) < 20:
                                 self.friend_ip_input += event.unicode
+                
+                elif self.state == "EDIT_CAT_NAME":
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_BACKSPACE: self.cat_name_input = self.cat_name_input[:-1]
+                        elif event.key == pygame.K_RETURN and self.cat_name_input: self.set_state("EDIT_CAT_WORDS")
+                        elif len(self.cat_name_input) < 20: self.cat_name_input += event.unicode.upper()
+
+                elif self.state == "EDIT_CAT_WORDS":
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_BACKSPACE: self.cat_words_input = self.cat_words_input[:-1]
+                        elif event.key == pygame.K_RETURN: self.save_custom_category()
+                        else: self.cat_words_input += event.unicode
 
                 # --- LOGIQUE LOBBY ---
                 elif self.state == "LOBBY":
@@ -1249,25 +1521,39 @@ class Game:
             elif self.state == "INPUT_NAME":
                 # Redesign complet du profil
                 cy = SCREEN_HEIGHT // 2
-                self.draw_panel(SCREEN_WIDTH//2 - 250, cy - 250, 500, 500)
-                self.draw_text_shadow("MON PROFIL", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, cy - 200)
+                self.draw_panel(SCREEN_WIDTH//2 - 450, cy - 400, 900, 800) # Agrandissement du panneau
+                self.draw_text_shadow("MON PROFIL", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, cy - 350)
                 
                 # Avatar
-                self.draw_avatar(self.avatar, SCREEN_WIDTH//2, cy - 80, 70)
+                self.draw_avatar(self.avatar, SCREEN_WIDTH//2, cy - 260, 70)
+                
+                # Zone de défilement Avatars
+                self.draw_text("Choisissez votre Avatar :", self.font, (150, 150, 150), SCREEN_WIDTH//2, cy - 175)
+                
+                # Cadre autour des emojis
+                grid_rect = pygame.Rect(SCREEN_WIDTH//2 - 390, cy - 155, 780, 170)
+                pygame.draw.rect(self.screen, (30, 35, 45), grid_rect, border_radius=10)
+                
+                # Clipping pour le scroll
+                clip_rect = pygame.Rect(SCREEN_WIDTH//2 - 380, cy - 150, 760, 160) # Hauteur réduite pour 3 lignes
+                self.screen.set_clip(clip_rect)
+                for btn in self.avatar_grid_buttons:
+                    btn.draw(self.screen)
+                self.screen.set_clip(None)
                 
                 # Input Pseudo
-                self.draw_text("Votre Pseudo :", self.font, TEXT_COLOR, SCREEN_WIDTH//2, cy + 80)
-                pygame.draw.rect(self.screen, (20, 25, 30), (SCREEN_WIDTH//2 - 150, cy + 105, 300, 50), border_radius=10)
-                pygame.draw.rect(self.screen, ACCENT_COLOR, (SCREEN_WIDTH//2 - 150, cy + 105, 300, 50), 2, border_radius=10)
-                self.draw_text(self.username, self.font, TEXT_COLOR, SCREEN_WIDTH//2, cy + 130)
+                self.draw_text("Votre Pseudo :", self.font, TEXT_COLOR, SCREEN_WIDTH//2, cy + 60)
+                pygame.draw.rect(self.screen, (20, 25, 30), (SCREEN_WIDTH//2 - 300, cy + 90, 600, 60), border_radius=10)
+                pygame.draw.rect(self.screen, ACCENT_COLOR, (SCREEN_WIDTH//2 - 300, cy + 90, 600, 60), 2, border_radius=10)
+                self.draw_text(self.username, self.font, TEXT_COLOR, SCREEN_WIDTH//2, cy + 120)
 
             elif self.state == "MENU_JOIN":
-                self.draw_panel(SCREEN_WIDTH//2 - 400, 200, 800, 500)
-                self.draw_text_shadow("REJOINDRE UNE PARTIE", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 260)
-                self.draw_text("Entrez l'IP de l'hôte :", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 360)
+                self.draw_panel(SCREEN_WIDTH//2 - 500, 150, 1000, 650) # Agrandissement fenêtre rejoindre
+                self.draw_text_shadow("REJOINDRE UNE PARTIE", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 220)
+                self.draw_text("Entrez l'IP de l'hôte :", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 320)
                 
                 # Input Box Moderne
-                input_rect = pygame.Rect(SCREEN_WIDTH//2 - 250, 410, 500, 70)
+                input_rect = pygame.Rect(SCREEN_WIDTH//2 - 300, 380, 600, 80)
                 pygame.draw.rect(self.screen, (20, 25, 30), input_rect, border_radius=15)
                 pygame.draw.rect(self.screen, ACCENT_COLOR, input_rect, 2, border_radius=15)
                 # Lueur interne
@@ -1275,17 +1561,23 @@ class Game:
                 
                 # Curseur clignotant
                 cursor = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else ""
-                self.draw_text(self.input_ip + cursor, self.big_font, TEXT_COLOR, SCREEN_WIDTH//2, 445)
+                self.draw_text(self.input_ip + cursor, self.big_font, TEXT_COLOR, SCREEN_WIDTH//2, 420)
                 
                 if self.connect_status:
                     col = ACCENT_COLOR if "Connecté" in self.connect_status else ALERT_COLOR
-                    self.draw_text(self.connect_status, self.font, col, SCREEN_WIDTH//2, 520)
+                    self.draw_text(self.connect_status, self.font, col, SCREEN_WIDTH//2, 500)
                 
-                self.draw_text("Demandez l'IP Internet à l'hôte (ou utilisez Radmin/Hamachi)", self.font, (100, 100, 100), SCREEN_WIDTH//2, 650)
+                self.draw_text("Demandez l'IP Internet à l'hôte (ou utilisez Radmin/Hamachi)", self.font, (100, 100, 100), SCREEN_WIDTH//2, 720)
 
             elif self.state == "MENU_FRIENDS":
                 self.draw_panel(SCREEN_WIDTH//2 - 300, 100, 600, 600)
                 self.draw_text_shadow("MES AMIS", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
+                
+                # Affichage IP Publique
+                ip_txt = f"Mon IP: {self.public_ip}" if self.public_ip else "Mon IP: Recherche..."
+                self.draw_text(ip_txt, self.font, (150, 150, 150), SCREEN_WIDTH//2 - 50, 180)
+                if self.connect_status == "IP Copiée !":
+                    self.draw_text("Copié !", self.font, ACCENT_COLOR, SCREEN_WIDTH//2 + 280, 180)
                 
                 start_y = 220
                 cx = SCREEN_WIDTH // 2
@@ -1294,11 +1586,8 @@ class Game:
                     row_rect = pygame.Rect(cx - 280, start_y + i*70, 560, 50)
                     pygame.draw.rect(self.screen, (35, 40, 50), row_rect, border_radius=10)
                     # Infos
-                    self.draw_text(f"{friend['name']}", self.font, TEXT_COLOR, cx - 260, start_y + i*70 + 25, center=False)
-                    self.draw_text(f"{friend['ip']}", self.font, (120, 120, 120), cx - 80, start_y + i*70 + 25, center=False)
-
-                if not self.friends:
-                    self.draw_text("Aucun ami enregistré.", self.font, (150, 150, 150), SCREEN_WIDTH//2, 300)
+                    self.draw_text(f"{friend['name']}", self.font, TEXT_COLOR, cx - 140, start_y + i*70 + 25, center=True)
+                    self.draw_text(f"{friend['ip']}", self.font, (120, 120, 120), cx + 140, start_y + i*70 + 25, center=True)
 
             elif self.state == "MENU_ADD_FRIEND":
                 self.draw_panel(SCREEN_WIDTH//2 - 300, 150, 600, 550)
@@ -1318,8 +1607,37 @@ class Game:
                 pygame.draw.rect(self.screen, col_ip, (SCREEN_WIDTH//2 - 200, 420, 400, 50), 2, border_radius=10)
                 self.draw_text(self.friend_ip_input, self.font, TEXT_COLOR, SCREEN_WIDTH//2, 445)
 
+            elif self.state == "MENU_CUSTOM_CATS":
+                self.draw_panel(SCREEN_WIDTH//2 - 300, 100, 600, 600)
+                self.draw_text_shadow("CATÉGORIES PERSO", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
+                start_y = 200
+                for i, cat in enumerate(self.custom_categories.keys()):
+                    self.draw_text(cat, self.font, TEXT_COLOR, SCREEN_WIDTH//2 - 50, start_y + i*60 + 25)
+
+            elif self.state == "EDIT_CAT_NAME":
+                self.draw_panel(SCREEN_WIDTH//2 - 300, 200, 600, 500)
+                self.draw_text_shadow("NOM DE LA CATÉGORIE", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 250)
+                pygame.draw.rect(self.screen, (20, 25, 30), (SCREEN_WIDTH//2 - 200, 350, 400, 60), border_radius=10)
+                pygame.draw.rect(self.screen, ACCENT_COLOR, (SCREEN_WIDTH//2 - 200, 350, 400, 60), 2, border_radius=10)
+                self.draw_text(self.cat_name_input, self.font, TEXT_COLOR, SCREEN_WIDTH//2, 380)
+
+            elif self.state == "EDIT_CAT_WORDS":
+                self.draw_panel(SCREEN_WIDTH//2 - 400, 100, 800, 700)
+                self.draw_text_shadow("AJOUTER DES MOTS", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
+                self.draw_text("Séparez les mots par des virgules (,)", self.font, (150, 150, 150), SCREEN_WIDTH//2, 220)
+                
+                # Zone de texte large
+                pygame.draw.rect(self.screen, (20, 25, 30), (SCREEN_WIDTH//2 - 350, 250, 700, 300), border_radius=10)
+                pygame.draw.rect(self.screen, ACCENT_COLOR, (SCREEN_WIDTH//2 - 350, 250, 700, 300), 2, border_radius=10)
+                
+                # Affichage multiline basique
+                words_text = self.cat_words_input
+                # Simple wrap visuel (très basique)
+                if len(words_text) > 50: words_text = "..." + words_text[-50:]
+                self.draw_text(words_text, self.font, TEXT_COLOR, SCREEN_WIDTH//2, 400)
+
             elif self.state == "SETUP":
-                self.draw_panel(SCREEN_WIDTH//2 - 400, 50, 800, 750)
+                self.draw_panel(SCREEN_WIDTH//2 - 500, 50, 1000, 750) # Agrandissement largeur
                 self.draw_text_shadow("CONFIGURATION DE LA PARTIE", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 100)
                 
                 cx = SCREEN_WIDTH // 2
@@ -1329,7 +1647,7 @@ class Game:
                 # 1. Joueurs
                 if self.is_local_game:
                     self.draw_text("JOUEURS", self.font, (150,150,150), cx, y - 15)
-                    self.draw_text(f"{self.settings['players']}", self.big_font, TEXT_COLOR, cx, y + 30)
+                    self.draw_text(f"{self.settings['players']}", self.medium_font, TEXT_COLOR, cx, y + 30)
                     y += gap
                 else:
                     self.draw_text(f"JOUEURS : 2 (En ligne)", self.font, (150, 150, 150), cx, y + 10)
@@ -1338,27 +1656,34 @@ class Game:
                 # 2. Mode
                 mode_str = "ÉCRIT" if self.settings['mode'] == 'WRITTEN' else "VOCAL"
                 self.draw_text("MODE DE JEU", self.font, (150,150,150), cx, y - 15)
-                self.draw_text(mode_str, self.big_font, TEXT_COLOR, cx, y + 30)
+                self.draw_text(mode_str, self.medium_font, TEXT_COLOR, cx, y + 30)
                 y += gap
                 
                 # 3. Catégorie
                 self.draw_text("THÈME", self.font, (150,150,150), cx, y - 15)
-                cat_font = self.medium_font if len(self.settings['category']) > 10 else self.big_font
+                cat_font = self.medium_font
                 self.draw_text(self.settings['category'], cat_font, ACCENT_COLOR, cx, y + 30)
                 y += gap
                 
                 # 4. Temps
                 self.draw_text("TEMPS PAR TOUR", self.font, (150,150,150), cx, y - 15)
-                self.draw_text(f"{self.settings['time']}s", self.big_font, TEXT_COLOR, cx, y + 30)
+                self.draw_text(f"{self.settings['time']}s", self.medium_font, TEXT_COLOR, cx, y + 30)
                 y += gap
 
             elif self.state == "CONFIRM_QUIT":
                 self.draw_panel(SCREEN_WIDTH//2 - 300, 300, 600, 300)
+                self.draw_panel(SCREEN_WIDTH//2 - 400, 300, 800, 300)
                 self.draw_text_shadow("CONFIRMATION", self.big_font, ALERT_COLOR, SCREEN_WIDTH//2, 350)
                 self.draw_text("Voulez-vous vraiment quitter ?", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 430)
 
+            elif self.state == "CONFIRM_LEAVE":
+                self.draw_panel(SCREEN_WIDTH//2 - 300, 300, 600, 300)
+                self.draw_panel(SCREEN_WIDTH//2 - 400, 300, 800, 300)
+                self.draw_text_shadow("QUITTER LA PARTIE ?", self.big_font, ALERT_COLOR, SCREEN_WIDTH//2, 350)
+                self.draw_text("Voulez-vous vraiment quitter la partie ?", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 430)
+
             elif self.state == "SETTINGS" or self.state == "CONTROLS":
-                self.draw_panel(SCREEN_WIDTH//2 - 250, 200, 500, 500)
+                self.draw_panel(SCREEN_WIDTH//2 - 500, 200, 1000, 600)
                 title = "PARAMÈTRES" if self.state == "SETTINGS" else "TOUCHES"
                 self.draw_text_shadow(title, self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 250)
                 if self.state == "CONTROLS":
@@ -1377,20 +1702,26 @@ class Game:
             
             elif self.state.startswith("MENU"):
                 # Titre stylisé pour les menus principaux
-                self.draw_text("WORLD RUSH", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
+                self.draw_text("WORLD RUSH", self.title_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
                 self.draw_text("Association d'idées rapide", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 210)
-            
-            elif self.state.startswith("MENU"):
-                # Titre stylisé pour les menus principaux
-                self.draw_text("WORLD RUSH", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 150)
-                self.draw_text("Association d'idées rapide", self.font, TEXT_COLOR, SCREEN_WIDTH//2, 210)
+                
+                # Barre d'XP (Menu Principal)
+                if self.state == "MENU_MAIN":
+                    xp_x, xp_y = 20, 20
+                    xp_w, xp_h = 200, 20
+                    self.draw_text(f"Niveau {self.level}", self.font, ACCENT_COLOR, xp_x + xp_w//2, xp_y + 30)
+                    threshold = self.level * 100
+                    ratio = min(1.0, self.xp / threshold)
+                    pygame.draw.rect(self.screen, (30, 35, 45), (xp_x, xp_y, xp_w, xp_h), border_radius=10)
+                    pygame.draw.rect(self.screen, (0, 200, 150), (xp_x, xp_y, int(xp_w * ratio), xp_h), border_radius=10)
+                    pygame.draw.rect(self.screen, (100, 100, 100), (xp_x, xp_y, xp_w, xp_h), 2, border_radius=10)
 
             elif self.state == "LOBBY":
                 # --- INTERFACE LOBBY ---
                 self.draw_text_shadow("SALON D'ATTENTE", self.big_font, ACCENT_COLOR, SCREEN_WIDTH//2, 60)
                 
                 # Zone Gauche : Joueurs
-                left_panel = pygame.Rect(50, 120, 500, 500)
+                left_panel = pygame.Rect(50, 100, 600, 650) # Agrandissement panneau joueurs
                 self.draw_panel(left_panel.x, left_panel.y, left_panel.w, left_panel.h)
                 self.draw_text("JOUEURS", self.font, ACCENT_COLOR, left_panel.centerx, left_panel.y + 30)
                 
@@ -1429,14 +1760,35 @@ class Game:
                     self.draw_text(f"UPnP: {self.upnp_status}", self.font, (150, 150, 150), left_panel.centerx, left_panel.y + 380)
 
                 # Zone Droite : Chat
-                chat_panel = pygame.Rect(570, 120, 660, 500)
+                chat_x = 680 # Décalage suite agrandissement gauche
+                chat_y = 100
+                chat_w = SCREEN_WIDTH - chat_x - 50
+                chat_h = SCREEN_HEIGHT - chat_y - 50
+                chat_panel = pygame.Rect(chat_x, chat_y, chat_w, chat_h)
                 self.draw_panel(chat_panel.x, chat_panel.y, chat_panel.w, chat_panel.h)
                 self.draw_text("CHAT", self.font, ACCENT_COLOR, chat_panel.centerx, chat_panel.y + 30)
                 
-                # Messages
-                start_msg_y = chat_panel.y + 70
-                for i, msg in enumerate(self.chat_messages[-10:]): # Affiche les 10 derniers
-                    self.draw_text(msg, self.font, TEXT_COLOR, chat_panel.x + 20, start_msg_y + i * 30, center=False)
+                # Messages (avec Scroll)
+                input_h = 60
+                header_h = 60
+                msg_area_y = chat_panel.y + header_h
+                msg_area_h = chat_panel.h - header_h - input_h - 10
+                line_h = 30
+                max_lines = msg_area_h // line_h
+                
+                total_msgs = len(self.chat_messages)
+                if total_msgs <= max_lines:
+                    self.chat_scroll = 0
+                    visible_msgs = self.chat_messages
+                else:
+                    max_scroll = total_msgs - max_lines
+                    if self.chat_scroll > max_scroll: self.chat_scroll = max_scroll
+                    start = total_msgs - max_lines - self.chat_scroll
+                    end = total_msgs - self.chat_scroll
+                    visible_msgs = self.chat_messages[start:end]
+
+                for i, msg in enumerate(visible_msgs):
+                    self.draw_text(msg, self.font, TEXT_COLOR, chat_panel.x + 20, msg_area_y + i * line_h, center=False)
                 
                 # Input Chat
                 pygame.draw.rect(self.screen, (20, 25, 35), (chat_panel.x + 20, chat_panel.bottom - 60, chat_panel.w - 40, 40), border_radius=10)
@@ -1448,7 +1800,7 @@ class Game:
                 ready_txt = "ANNULER" if self.ready_status[self.my_id] else "PRÊT !"
                 
                 # On dessine un bouton spécial pour le statut prêt
-                ready_btn_rect = pygame.Rect(SCREEN_WIDTH//2 - 100, 650, 200, 60)
+                ready_btn_rect = pygame.Rect(left_panel.centerx - 125, left_panel.bottom + 20, 250, 70) # Déplacé en dessous
                 pygame.draw.rect(self.screen, ready_col, ready_btn_rect, border_radius=15)
                 self.draw_text_shadow(ready_txt, self.font, (30, 30, 30), ready_btn_rect.centerx, ready_btn_rect.centery)
                 
@@ -1593,11 +1945,37 @@ class Game:
 
             # Copyright & Version
             self.draw_text("© dodosi", self.font, (80, 80, 90), SCREEN_WIDTH - 80, SCREEN_HEIGHT - 30)
-            self.draw_text("v0.2", self.font, (80, 80, 90), 40, SCREEN_HEIGHT - 30)
+            self.draw_text(CURRENT_VERSION, self.font, (80, 80, 90), 40, SCREEN_HEIGHT - 30)
+            
+            # Clic caché sur la version pour vérifier les mises à jour manuellement
+            if pygame.mouse.get_pressed()[0]:
+                mx, my = pygame.mouse.get_pos()
+                if mx < 100 and my > SCREEN_HEIGHT - 50:
+                    threading.Thread(target=self.check_update, daemon=True).start()
 
             # Indicateur Mode Développeur
             if self.test_mode:
                 self.draw_text("DEV MODE", self.font, ALERT_COLOR, 80, 30)
+
+            # --- TRANSITION ---
+            if self.transition_state == "OUT":
+                self.transition_alpha += 15
+                if self.transition_alpha >= 255:
+                    self.transition_alpha = 255
+                    self.state = self.next_state
+                    self._apply_state_change()
+                    self.transition_state = "IN"
+            elif self.transition_state == "IN":
+                self.transition_alpha -= 15
+                if self.transition_alpha <= 0:
+                    self.transition_alpha = 0
+                    self.transition_state = None
+            
+            if self.transition_alpha > 0:
+                s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+                s.set_alpha(self.transition_alpha)
+                s.fill((0, 0, 0))
+                self.screen.blit(s, (0, 0))
 
             pygame.display.flip()
             self.clock.tick(60)
