@@ -31,6 +31,8 @@ python "wordrush.py"
 *   **Réseau** : Système de Lobby, Chat intégré et tentative UPnP automatique pour l'hébergement.
 *   **Gameplay** : Chronomètre stressant, validation de mots, et système de contestation.
 *   **Personnalisation** : Choix des thèmes, du temps et du score.
+*   succes : permet de gagner des piece
+*   magazins : permet d'echeter des decorations
 
 ## Contrôles
 
