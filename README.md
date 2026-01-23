@@ -1,4 +1,4 @@
-# World Rush v0.23
+# World Rush v0.3
 
 World Rush est un jeu d'association d'idées rapide et compétitif codé en Python. Jouez en local ou en ligne, défiez vos amis et testez votre rapidité !
 
