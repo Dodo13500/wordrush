@@ -1,6 +1,5 @@
 
 #  World Rush (v0.41)
- fc28907 (Sauvegarde locale avant pull)
 
 Un jeu d'association d'idées rapide et compétitif, jouable en local ou en ligne.
 
