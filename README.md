@@ -41,19 +41,6 @@ Un jeu d'association d'idées rapide et compétitif, jouable en local ou en lign
 - **Packs de Mots** : Achetez de nouvelles catégories pour varier les parties.
 - **Cadeau du Jour** : Récupérez des pièces gratuites chaque jour dans le magasin.
 
-##  Mode Développeur (Cheat Mode)
-Appuyez **3 fois rapidement sur 'T'** dans n'importe quel menu pour activer/désactiver.
-Un cadre rouge apparaît quand le mode est actif.
-
-**Raccourcis Dev :**
-- **X** : Gagner de l'XP (+500).
-- **U** : Débloquer tous les succès.
-- **I** : Débloquer tous les objets du magasin.
-- **W** : Victoire instantanée (en jeu).
-- **:** (Deux points) : Gagner le point actuel.
-- **/** (Slash) : Perdre le point actuel.
-- **Tapez "coins"** : Cheat code pour gagner 10 000 pièces.
-
 ##  Sauvegarde
 - Vos données (Niveau, Inventaire, Amis, Historique) sont sauvegardées automatiquement dans `world_rush_settings.json`.
 - Possibilité d'exporter/importer votre sauvegarde via les Paramètres.
