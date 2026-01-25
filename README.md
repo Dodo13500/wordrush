@@ -1,5 +1,4 @@
 
-# World Rush v0.3
 #  World Rush (v0.4)
  fc28907 (Sauvegarde locale avant pull)
 
